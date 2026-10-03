@@ -70,6 +70,10 @@ like robots.) */
 #define NODE_SNAP_DISTANCE 0.4f
 /* ... a first-person node may move relative to the camera */
 #define FIRST_PERSON_SNAP_DISTANCE 0.25f
+/* the ticks the first-person pose drawn last may be behind and still be
+blended from: frames down to 10 a second, short of a pose left from before
+the view was away from first person */
+#define FIRST_PERSON_MAXIMUM_SPAN 3
 /* a correction's difference left drawn after each tick (of 1) */
 #define CORRECTION_DECAY 0.6f
 /* ... and small enough to be none */
@@ -120,6 +124,8 @@ struct interpolated_object
 struct interpolated_camera
 {
 	long tick;
+	/* the ticks between the two snapshots (span_fraction) */
+	long span;
 	boolean valid;
 	boolean has_previous;
 	struct observer_result previous;
@@ -133,6 +139,8 @@ struct interpolated_camera
 struct interpolated_first_person
 {
 	long tick;
+	/* the ticks between the two poses (span_fraction) */
+	long span;
 	short node_count;
 	boolean has_previous;
 	real_matrix4x3 previous[MAXIMUM_INTERPOLATED_NODES];
@@ -372,6 +380,19 @@ static void correction_add(real_vector3d *correction, real_vector3d *pending, re
 		*correction = *global_zero_vector3d;
 		*pending = *global_zero_vector3d;
 	}
+}
+
+/* The camera and the first-person weapon are snapshotted on the first frame
+drawn after a tick, the objects on every tick. Where frames come slower than
+ticks, the snapshots of the first two are more than a tick apart while the
+objects' are one, and blending the first by the frame's fraction of a tick
+drew the camera ahead of the vehicle it rode (the escape pod in a30, from
+outside every other frame). A frame falls in the last tick of the span, as
+the objects are drawn; with a frame every tick or more often it is the
+fraction itself. */
+static real span_fraction(long span, real t)
+{
+	return span > 1 ? ((real)(span - 1) + t) / (real)span : t;
 }
 
 static real distance_squared(real_point3d const *a, real_point3d const *b)
@@ -749,18 +770,22 @@ static struct observer_result const *render_interpolation_blended_camera(
 			camera->correction_pending = *global_zero_vector3d;
 		}
 		camera->has_previous = camera->valid;
+		camera->span = camera->valid && interpolation_tick > camera->tick ? interpolation_tick - camera->tick : 1;
 		camera->previous = camera->latest;
 		camera->latest = *observer;
 		camera->tick = interpolation_tick;
 		camera->valid = TRUE;
 	}
-	/* (so written that a position or direction not a number cuts) */
+	t = span_fraction(camera->span, t);
+	/* a cut is a jump or turn too far for each tick between the snapshots
+	(so written that a position or direction not a number cuts) */
 	if (!camera->has_previous ||
 		!(distance_squared(&camera->previous.position, &camera->latest.position) <=
-			CAMERA_CUT_DISTANCE * CAMERA_CUT_DISTANCE) ||
+			CAMERA_CUT_DISTANCE * CAMERA_CUT_DISTANCE * (real)(camera->span * camera->span)) ||
 		!(camera->previous.forward.i * camera->latest.forward.i +
 			camera->previous.forward.j * camera->latest.forward.j +
-			camera->previous.forward.k * camera->latest.forward.k >= CAMERA_CUT_COSINE))
+			camera->previous.forward.k * camera->latest.forward.k >=
+			cosf((real)MIN(camera->span, 3) * acosf(CAMERA_CUT_COSINE))))
 	{
 		return observer;
 	}
@@ -833,10 +858,13 @@ void render_interpolation_first_person(
 	matrix4x3_inverse(&camera_matrix, &inverse_camera);
 	if (first_person->tick != interpolation_tick)
 	{
-		/* the pose drawn last, if that was at the end of the tick just
-		before: not one left from before the view was last away from first
-		person (zoomed, in a vehicle, dead, in a cinematic), seconds old */
-		first_person->has_previous = first_person->tick == interpolation_tick - 1 &&
+		/* the pose drawn last, if that was a tick or a few before (frames may
+		come slower than ticks): not one left from before the view was last
+		away from first person (zoomed, in a vehicle, dead, in a cinematic),
+		seconds old */
+		first_person->span = interpolation_tick > first_person->tick ? interpolation_tick - first_person->tick : 1;
+		first_person->has_previous = interpolation_tick > first_person->tick &&
+			first_person->span <= FIRST_PERSON_MAXIMUM_SPAN &&
 			first_person->node_count == node_count;
 		memcpy(first_person->previous, first_person->latest, sizeof(first_person->previous));
 		first_person->tick = interpolation_tick;
@@ -846,16 +874,18 @@ void render_interpolation_first_person(
 	first_person->node_count = node_count;
 	if (!first_person->has_previous)
 		return;
-	/* a node that jumped further in the camera's frame than a tick allows:
-	the last pose was another weapon's skeleton (of as many nodes), not this
-	one moving (so written that a position not a number snaps) */
+	/* a node that jumped further in the camera's frame than the ticks between
+	the poses allow: the last pose was another weapon's skeleton (of as many
+	nodes), not this one moving (so written that a position not a number
+	snaps) */
 	for (node_index = 0; node_index < node_count; node_index++)
 	{
 		real_matrix4x3 const *previous = &first_person->previous[node_index];
 		real_matrix4x3 const *latest = &first_person->latest[node_index];
 
 		if (!(distance_squared(&previous->position, &latest->position) <=
-			FIRST_PERSON_SNAP_DISTANCE * FIRST_PERSON_SNAP_DISTANCE))
+			FIRST_PERSON_SNAP_DISTANCE * FIRST_PERSON_SNAP_DISTANCE *
+			(real)(first_person->span * first_person->span)))
 		{
 			return;
 		}
@@ -871,7 +901,7 @@ void render_interpolation_first_person(
 			&first_person->latest[node_index],
 			&previous_rotations[node_index],
 			&latest_rotations[node_index],
-			interpolation_fraction,
+			span_fraction(first_person->span, interpolation_fraction),
 			&blended);
 		matrix4x3_multiply(&camera_matrix, &blended, &node_matrices[node_index]);
 	}
