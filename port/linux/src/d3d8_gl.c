@@ -199,6 +199,20 @@ static void screen_mode_choose(long *width, float scale[2])
 		keeps its shape and the display blit letterboxes it */
 		if (*width != wanted && *width != (wanted & ~1L))
 			scale[0] = scale[1] = scale[0] < scale[1] ? scale[0] : scale[1];
+		/* fewer of the window's pixels (display.render_scale), which the
+		display blit scales up: no fewer than the Xbox's 480 lines */
+		{
+			float fraction = (float)config_real("display.render_scale");
+			float smallest = scale[0] < scale[1] ? scale[0] : scale[1];
+
+			if (fraction < 1.0f && smallest > 1.0f)
+			{
+				if (fraction * smallest < 1.0f)
+					fraction = 1.0f / smallest;
+				scale[0] *= fraction;
+				scale[1] *= fraction;
+			}
+		}
 		/* supersampling: twice the pixels each way, or as many as the GPU's
 		largest target has (once it is known), which the display blit
 		scales down; not with "original" resolution scaling, which draws
