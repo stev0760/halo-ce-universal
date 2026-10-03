@@ -429,6 +429,13 @@ BOOL xgpu_post_prepare(BOOL smaa)
 
 	if (post.failed[smaa != FALSE])
 		return FALSE;
+	/* (the programs are GLSL 4.50's, which OpenGL 2.1 cannot build) */
+	if (XGPU_LEGACY)
+	{
+		platform_log("anti-aliasing: %s needs OpenGL 4.5", smaa ? "SMAA" : "FXAA");
+		post.failed[smaa != FALSE] = TRUE;
+		return FALSE;
+	}
 	for (which = first; which <= last; which++)
 	{
 		if (!post.programs[which] && !(post.programs[which] = program_build(which)))

@@ -138,7 +138,11 @@ static void operand(struct xgpu_text *text, const DWORD *instruction, char which
 		xgpu_text_append(text, "v%lu", field(instruction, 1, 9, 4));
 		break;
 	case _mux_constant:
-		if (relative)
+		/* (GLSL 1.20 clamps floats only) */
+		if (relative && XGPU_LEGACY)
+			xgpu_text_append(text, "c[int(clamp(float(a0 + %lu), 0.0, %d.0))]", field(instruction, 1, 13, 8),
+				XGPU_VERTEX_CONSTANT_COUNT - 1);
+		else if (relative)
 			xgpu_text_append(text, "c[clamp(a0 + %lu, 0, %d)]", field(instruction, 1, 13, 8), XGPU_VERTEX_CONSTANT_COUNT - 1);
 		else
 			xgpu_text_append(text, "c[%lu]", field(instruction, 1, 13, 8));
@@ -328,37 +332,23 @@ BOOL nv2a_vertex_shader_lighting(const DWORD *instructions, unsigned long instru
 
 /* ---------- translation */
 
-static const char shader_prologue[] =
-#ifdef HALO_ANDROID
-	/* the #version line comes first, from the context's capabilities */
-	"precision highp float;\n"
-	"precision highp int;\n"
-#else
-	"#version 450 core\n"
-#endif
+static const char shader_uniforms[] =
 	"uniform vec4 c[192];\n"
 	"uniform vec4 viewport_scale;\n"
 	"uniform vec4 viewport_offset;\n"
 	"uniform float point_size;\n"
 	/* columns the menus shift by to center on a wide screen (d3d8_gl.c) */
-	"uniform float screen_offset;\n"
-	"out vec4 xD0;\n"
-	"out vec4 xD1;\n"
-	"out vec4 xB0;\n"
-	"out vec4 xB1;\n"
-	"out vec4 xT0;\n"
-	"out vec4 xT1;\n"
-	"out vec4 xT2;\n"
-	"out vec4 xT3;\n"
-	"out float xFog;\n"
+	"uniform float screen_offset;\n";
+
+/* what the pixel shader reads (nv2a_psh.c), each after "out" or GLSL 1.20's
+"varying" */
+static const char *const shader_outputs[] =
+{
+	"vec4 xD0", "vec4 xD1", "vec4 xB0", "vec4 xB1", "vec4 xT0", "vec4 xT1", "vec4 xT2", "vec4 xT3", "float xFog",
+};
+
+static const char shader_functions[] =
 	"invariant gl_Position;\n"
-	"vec4 unpack_normpacked3(uint p)\n"
-	"{\n"
-	"	int x = int(p << 21) >> 21;\n"
-	"	int y = int(p << 10) >> 21;\n"
-	"	int z = int(p) >> 22;\n"
-	"	return vec4(float(x) / 1023.0, float(y) / 1023.0, float(z) / 511.0, 1.0);\n"
-	"}\n"
 	"vec4 nv2a_rcc(float x)\n"
 	"{\n"
 	"	float r = 1.0 / x;\n"
@@ -383,6 +373,31 @@ static const char shader_prologue[] =
 	"	return vec4(1.0, max(s.x, 0.0), specular, 1.0);\n"
 	"}\n";
 
+/* NORMPACKED3: x in bits 0-10, y in 11-21 and z in 22-31, signed */
+static const char unpack_normpacked3[] =
+	"vec4 unpack_normpacked3(uint p)\n"
+	"{\n"
+	"	int x = int(p << 21) >> 21;\n"
+	"	int y = int(p << 10) >> 21;\n"
+	"	int z = int(p) >> 22;\n"
+	"	return vec4(float(x) / 1023.0, float(y) / 1023.0, float(z) / 511.0, 1.0);\n"
+	"}\n";
+
+/* ... and from the word's 16-bit halves, without GLSL 1.20's missing
+integers: whole numbers below 65536 are exact as floats, and so is every
+step here */
+static const char unpack_normpacked3_halves[] =
+	"vec4 unpack_normpacked3(vec2 p)\n"
+	"{\n"
+	"	float x = mod(p.x, 2048.0);\n"
+	"	float y = floor(p.x / 2048.0) + mod(p.y, 64.0) * 32.0;\n"
+	"	float z = floor(p.y / 64.0);\n"
+	"	x = x >= 1024.0 ? x - 2048.0 : x;\n"
+	"	y = y >= 1024.0 ? y - 2048.0 : y;\n"
+	"	z = z >= 512.0 ? z - 1024.0 : z;\n"
+	"	return vec4(x / 1023.0, y / 1023.0, z / 511.0, 1.0);\n"
+	"}\n";
+
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting)
 {
@@ -390,17 +405,29 @@ char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instru
 	unsigned long index;
 
 #ifdef HALO_ANDROID
-	xgpu_text_append(&text, "#version %s\n", xgpu_capabilities.shading_language);
+	xgpu_text_append(&text, "#version %s\nprecision highp float;\nprecision highp int;\n",
+		xgpu_capabilities.shading_language);
+#else
+	xgpu_text_append(&text, "%s", XGPU_LEGACY ? "#version 120\n" : "#version 450 core\n");
 #endif
-	xgpu_text_append(&text, "%s", shader_prologue);
+	xgpu_text_append(&text, "%s", shader_uniforms);
+	for (index = 0; index < sizeof(shader_outputs) / sizeof(shader_outputs[0]); index++)
+		xgpu_text_append(&text, "%s %s;\n", XGPU_LEGACY ? "varying" : "out", shader_outputs[index]);
 	/* (the pixel shader's model_lighting; the normal's length in w) */
 	if (lighting)
-		xgpu_text_append(&text, "out vec4 xWorldNormal;\n");
+		xgpu_text_append(&text, "%s vec4 xWorldNormal;\n", XGPU_LEGACY ? "varying" : "out");
 	if (lighting && lighting->lights == 2)
-		xgpu_text_append(&text, "out vec3 xWorldPosition;\n");
+		xgpu_text_append(&text, "%s vec3 xWorldPosition;\n", XGPU_LEGACY ? "varying" : "out");
+	xgpu_text_append(&text, "%s%s", shader_functions, XGPU_LEGACY ? unpack_normpacked3_halves : unpack_normpacked3);
 	for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
 	{
-		if (packed_attribute_mask & (1UL << index))
+		/* (GLSL 1.20 has no layout qualifiers: the program binds each
+		attribute's location by its name, d3d8_gl.c program_get) */
+		if (XGPU_LEGACY && (packed_attribute_mask & (1UL << index)))
+			xgpu_text_append(&text, "attribute vec2 v%lu_packed;\n", index);
+		else if (XGPU_LEGACY)
+			xgpu_text_append(&text, "attribute vec4 v%lu_in;\n", index);
+		else if (packed_attribute_mask & (1UL << index))
 			xgpu_text_append(&text, "layout(location = %lu) in uint v%lu_packed;\n", index, index);
 		else
 			xgpu_text_append(&text, "layout(location = %lu) in vec4 v%lu_in;\n", index, index);

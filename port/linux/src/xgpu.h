@@ -37,6 +37,25 @@ unsigned int host_gl_read_buffer_word(unsigned int buffer, unsigned int offset);
 void host_gl_buffer_write(unsigned int target, unsigned int offset, unsigned int size, const void *data);
 void host_gl_fence_frame(unsigned int slot);
 void host_gl_wait_frame(unsigned int slot);
+#else
+/* the desktop context (d3d8_gl.c gl_initialize): OpenGL 4.5 core, or
+OpenGL 2.1 where the graphics have no more (Intel's Ironlake and older,
+sdl_platform.c), with the extensions Mesa offers there for the rest */
+struct xgpu_capabilities
+{
+	/* OpenGL 2.1: GLSL 1.20 shaders (no integers, attribute and varying
+	qualifiers, gl_FragColor), no query buffers and no memory barriers */
+	BOOL legacy;
+};
+
+extern struct xgpu_capabilities xgpu_capabilities;
+#endif
+
+/* drawing with OpenGL 2.1 (never on Android) */
+#ifdef HALO_ANDROID
+#define XGPU_LEGACY FALSE
+#else
+#define XGPU_LEGACY (xgpu_capabilities.legacy)
 #endif
 
 /* ---------- GL state
@@ -90,10 +109,11 @@ BOOL nv2a_vertex_shader_lighting(const DWORD *instructions, unsigned long instru
 
 /* GLSL for an NV2A vertex program (the instruction words after the program
 header). Attributes whose bit is set in packed_attribute_mask are fed as
-NORMPACKED3 32-bit integers and unpacked in the shader. With lighting (else
-NULL), the normal and world position go to the pixel shader too, which
-lights the diffuse color for each pixel (nv2a_pixel_shader_key
-per_pixel_lighting). Returns a malloc'd string. */
+NORMPACKED3 32-bit integers and unpacked in the shader (with OpenGL 2.1, as
+two unsigned shorts: xgpu_capabilities.legacy). With lighting (else NULL),
+the normal and world position go to the pixel shader too, which lights the
+diffuse color for each pixel (nv2a_pixel_shader_key per_pixel_lighting).
+Returns a malloc'd string. */
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting);
 

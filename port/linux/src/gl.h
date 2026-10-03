@@ -134,6 +134,7 @@ this list to generate the guest's entry points */
 	X(glEndQuery) \
 	X(glGetQueryObjectuiv)
 /* ANDROID_GL_FUNCTIONS_END */
+#define GL_FUNCTIONS_OPTIONAL(X)
 #else
 #define GL_FUNCTIONS(X) \
 	X(glGetString) \
@@ -204,22 +205,12 @@ this list to generate the guest's entry points */
 	X(glBindBuffer) \
 	X(glBufferData) \
 	X(glBufferSubData) \
-	X(glBufferStorage) \
-	X(glMapBufferRange) \
-	X(glBindBufferBase) \
 	X(glGenVertexArrays) \
 	X(glBindVertexArray) \
 	X(glEnableVertexAttribArray) \
 	X(glDisableVertexAttribArray) \
 	X(glVertexAttribPointer) \
-	X(glVertexAttribIPointer) \
-	X(glVertexAttribFormat) \
-	X(glVertexAttribIFormat) \
-	X(glVertexAttribBinding) \
-	X(glBindVertexBuffer) \
-	X(glGetQueryBufferObjectuiv) \
 	X(glVertexAttrib4fv) \
-	X(glVertexAttribI4ui) \
 	X(glDrawArrays) \
 	X(glDrawElements) \
 	X(glDrawElementsBaseVertex) \
@@ -232,7 +223,6 @@ this list to generate the guest's entry points */
 	X(glCreateProgram) \
 	X(glAttachShader) \
 	X(glBindAttribLocation) \
-	X(glBindFragDataLocation) \
 	X(glLinkProgram) \
 	X(glGetProgramiv) \
 	X(glGetProgramInfoLog) \
@@ -246,13 +236,28 @@ this list to generate the guest's entry points */
 	X(glGenQueries) \
 	X(glBeginQuery) \
 	X(glEndQuery) \
-	X(glGetQueryObjectuiv) \
+	X(glGetQueryObjectuiv)
+/* OpenGL 3 and 4 functions that only the OpenGL 4.5 path calls: an OpenGL
+2.1 context can lack them (xgpu_capabilities.legacy), so they are optional */
+#define GL_FUNCTIONS_OPTIONAL(X) \
+	X(glBufferStorage) \
+	X(glMapBufferRange) \
+	X(glBindBufferBase) \
+	X(glVertexAttribIPointer) \
+	X(glVertexAttribFormat) \
+	X(glVertexAttribIFormat) \
+	X(glVertexAttribBinding) \
+	X(glBindVertexBuffer) \
+	X(glGetQueryBufferObjectuiv) \
+	X(glVertexAttribI4ui) \
+	X(glBindFragDataLocation) \
 	X(glMemoryBarrier) \
 	X(glDebugMessageCallback)
 #endif
 
 #define GL_DECLARE_FUNCTION(name) extern __typeof__(&name) halo_##name;
 GL_FUNCTIONS(GL_DECLARE_FUNCTION)
+GL_FUNCTIONS_OPTIONAL(GL_DECLARE_FUNCTION)
 #undef GL_DECLARE_FUNCTION
 
 /* call sites use the ordinary names; gl_functions.c, which defines the
@@ -480,7 +485,8 @@ pointers, sees the declarations without these aliases */
 #endif
 #endif
 
-/* returns FALSE (and logs) if a required function is missing */
+/* returns FALSE (and logs) if a required function is missing; a missing
+optional one is left NULL */
 int gl_functions_load(void);
 
 #endif

@@ -50,10 +50,10 @@ and entry points used below that ES lacks */
 #ifndef GL_CLAMP_TO_BORDER
 #define GL_CLAMP_TO_BORDER 0x812d
 #endif
+#endif
 
 /* what the context supports (gl_initialize) */
 struct xgpu_capabilities xgpu_capabilities;
-#endif
 
 /* ---------- the screen's width
 
@@ -529,6 +529,11 @@ struct gl_device
 	had caught up */
 	GLuint visibility_results_buffer;
 	volatile GLuint *visibility_results;
+	/* without a query buffer (OpenGL 2.1), each test's latest count read
+	back, given while its newer query is still pending: the game would
+	otherwise spin there until the GPU had caught up */
+	GLuint visibility_latest[VISIBILITY_TEST_SLOTS];
+	BOOL visibility_latest_known[VISIBILITY_TEST_SLOTS];
 	/* a pipeline flush every flush_every draws (draw_flush), 0 never */
 	unsigned long flush_every;
 	unsigned long flush_draws;
@@ -594,7 +599,6 @@ xgpu_gl_state_invalidate, after which every value is set again. Unknown
 values are all ones, which no real value matches (floats become NaN, which
 compares unequal to everything). */
 
-#ifdef HALO_ANDROID
 struct attribute_pointer
 {
 	GLuint buffer;
@@ -605,7 +609,8 @@ struct attribute_pointer
 	GLsizei stride;
 	unsigned long offset;
 };
-#else
+
+#ifndef HALO_ANDROID
 /* desktop GL (4.3) separates an attribute's format from the buffer it
 reads: the attributes of a stream share one binding, so a draw that moves
 the stream rebinds it once instead of pointing each attribute again */
@@ -659,9 +664,9 @@ static struct
 	GLuint array_buffer;
 	GLuint element_array_buffer;
 	unsigned char attribute_enabled[XGPU_VERTEX_ATTRIBUTE_COUNT];
-#ifdef HALO_ANDROID
+	/* (on ES, and on desktop GL with OpenGL 2.1) */
 	struct attribute_pointer attribute_pointers[XGPU_VERTEX_ATTRIBUTE_COUNT];
-#else
+#ifndef HALO_ANDROID
 	struct attribute_format attribute_formats[XGPU_VERTEX_ATTRIBUTE_COUNT];
 	struct vertex_binding vertex_bindings[VERTEX_BINDING_COUNT];
 #endif
@@ -752,20 +757,55 @@ static void state_element_array_buffer(GLuint buffer)
 vertex is stride bytes on from the one before it, starting at
 buffer_offset, with the attribute relative_offset bytes into it.
 Attributes given the same binding share the buffer, its offset and its
-stride (on desktop GL; ES points each attribute on its own). */
+stride (on desktop GL; ES, and OpenGL 2.1, point each attribute on its
+own). */
 static void state_attribute_stream(GLuint index, GLuint binding, GLuint buffer, GLint size, GLenum type,
 	GLboolean normalized, BOOL integer, GLsizei stride, unsigned long buffer_offset, unsigned long relative_offset)
 {
-#ifdef HALO_ANDROID
 	struct attribute_pointer *pointer = &gl_state.attribute_pointers[index];
 	unsigned long offset = buffer_offset + relative_offset;
 
-	(void)binding;
 	if (gl_state.attribute_enabled[index] != 1)
 	{
 		gl_state.attribute_enabled[index] = 1;
 		glEnableVertexAttribArray(index);
 	}
+#ifndef HALO_ANDROID
+	if (!XGPU_LEGACY)
+	{
+		struct attribute_format *format = &gl_state.attribute_formats[index];
+		struct vertex_binding *vertex_binding = &gl_state.vertex_bindings[binding];
+
+		if (format->size != size || format->type != type || format->normalized != normalized ||
+			format->integer != (integer ? GL_TRUE : GL_FALSE) || format->relative_offset != relative_offset)
+		{
+			if (integer)
+				glVertexAttribIFormat(index, size, type, (GLuint)relative_offset);
+			else
+				glVertexAttribFormat(index, size, type, normalized, (GLuint)relative_offset);
+			format->size = size;
+			format->type = type;
+			format->normalized = normalized;
+			format->integer = integer ? GL_TRUE : GL_FALSE;
+			format->relative_offset = (GLuint)relative_offset;
+		}
+		if (format->binding != binding)
+		{
+			glVertexAttribBinding(index, binding);
+			format->binding = binding;
+		}
+		if (vertex_binding->buffer != buffer || vertex_binding->offset != buffer_offset ||
+			vertex_binding->stride != stride)
+		{
+			glBindVertexBuffer(binding, buffer, (GLintptr)buffer_offset, stride);
+			vertex_binding->buffer = buffer;
+			vertex_binding->offset = buffer_offset;
+			vertex_binding->stride = stride;
+		}
+		return;
+	}
+#endif
+	(void)binding;
 	if (pointer->buffer == buffer && pointer->size == size && pointer->type == type &&
 		pointer->normalized == normalized && pointer->integer == (integer ? GL_TRUE : GL_FALSE) &&
 		pointer->stride == stride && pointer->offset == offset)
@@ -784,41 +824,6 @@ static void state_attribute_stream(GLuint index, GLuint binding, GLuint buffer, 
 	pointer->integer = integer ? GL_TRUE : GL_FALSE;
 	pointer->stride = stride;
 	pointer->offset = offset;
-#else
-	struct attribute_format *format = &gl_state.attribute_formats[index];
-	struct vertex_binding *vertex_binding = &gl_state.vertex_bindings[binding];
-
-	if (gl_state.attribute_enabled[index] != 1)
-	{
-		gl_state.attribute_enabled[index] = 1;
-		glEnableVertexAttribArray(index);
-	}
-	if (format->size != size || format->type != type || format->normalized != normalized ||
-		format->integer != (integer ? GL_TRUE : GL_FALSE) || format->relative_offset != relative_offset)
-	{
-		if (integer)
-			glVertexAttribIFormat(index, size, type, (GLuint)relative_offset);
-		else
-			glVertexAttribFormat(index, size, type, normalized, (GLuint)relative_offset);
-		format->size = size;
-		format->type = type;
-		format->normalized = normalized;
-		format->integer = integer ? GL_TRUE : GL_FALSE;
-		format->relative_offset = (GLuint)relative_offset;
-	}
-	if (format->binding != binding)
-	{
-		glVertexAttribBinding(index, binding);
-		format->binding = binding;
-	}
-	if (vertex_binding->buffer != buffer || vertex_binding->offset != buffer_offset || vertex_binding->stride != stride)
-	{
-		glBindVertexBuffer(binding, buffer, (GLintptr)buffer_offset, stride);
-		vertex_binding->buffer = buffer;
-		vertex_binding->offset = buffer_offset;
-		vertex_binding->stride = stride;
-	}
-#endif
 }
 
 /* disables the attribute, which then reads value, or the integer zero */
@@ -841,6 +846,13 @@ static void state_attribute_value(GLuint index, const float *value)
 	{
 		memcpy(gl_state.attribute_values[index], value, sizeof(gl_state.attribute_values[index]));
 		glVertexAttrib4fv(index, value);
+	}
+	else if (XGPU_LEGACY)
+	{
+		/* (the halves of a NORMPACKED3 word: setup_streams) */
+		static const float zero[4];
+
+		glVertexAttrib4fv(index, zero);
 	}
 	else
 	{
@@ -972,6 +984,23 @@ GLuint xgpu_link_program(GLuint vertex_shader, GLuint fragment_shader, const cha
 
 	glAttachShader(program, vertex_shader);
 	glAttachShader(program, fragment_shader);
+	if (XGPU_LEGACY)
+	{
+		/* GLSL 1.20 has no layout qualifiers: a vertex program's input
+		register i is attribute i by name (nv2a_vsh.c); a program without
+		those names ignores them */
+		int index;
+
+		for (index = 0; index < XGPU_VERTEX_ATTRIBUTE_COUNT; index++)
+		{
+			char name[16];
+
+			snprintf(name, sizeof(name), "v%d_in", index);
+			glBindAttribLocation(program, (GLuint)index, name);
+			snprintf(name, sizeof(name), "v%d_packed", index);
+			glBindAttribLocation(program, (GLuint)index, name);
+		}
+	}
 	glLinkProgram(program);
 	glGetProgramiv(program, GL_LINK_STATUS, &status);
 	if (!status)
@@ -1349,14 +1378,62 @@ static BOOL bind_targets(BOOL *has_depth)
 
 /* ---------- device creation */
 
+#ifndef HALO_ANDROID
+static BOOL gl_has_extension(const char *extensions, const char *name)
+{
+	size_t length = strlen(name);
+	const char *found;
+
+	for (found = extensions; found && (found = strstr(found, name)) != NULL; found += length)
+	{
+		if ((found == extensions || found[-1] == ' ') && (found[length] == ' ' || !found[length]))
+			return TRUE;
+	}
+	return FALSE;
+}
+
+/* OpenGL 2.1 lacks much of what the renderer uses, which Mesa's drivers
+offer as extensions even on graphics that old (Intel's Ironlake): name any
+missing, as the draws that need them fail or come out wrong */
+static void legacy_extensions_check(void)
+{
+	/* each the extension, or another that does as well */
+	static const char *const required[][2] =
+	{
+		{ "GL_ARB_framebuffer_object", NULL },
+		{ "GL_ARB_sampler_objects", NULL },
+		{ "GL_ARB_vertex_array_object", NULL },
+		{ "GL_ARB_draw_elements_base_vertex", NULL },
+		{ "GL_ARB_copy_image", NULL },
+		{ "GL_ARB_copy_buffer", NULL },
+		{ "GL_ARB_clip_control", NULL },
+		{ "GL_ARB_texture_swizzle", "GL_EXT_texture_swizzle" },
+		{ "GL_ARB_vertex_array_bgra", "GL_EXT_vertex_array_bgra" },
+		{ "GL_EXT_texture_compression_s3tc", NULL },
+		{ "GL_EXT_texture_filter_anisotropic", "GL_ARB_texture_filter_anisotropic" },
+	};
+	const char *extensions = (const char *)glGetString(GL_EXTENSIONS);
+	unsigned long index;
+
+	for (index = 0; index < sizeof(required) / sizeof(required[0]); index++)
+	{
+		if (!gl_has_extension(extensions, required[index][0]) &&
+			(!required[index][1] || !gl_has_extension(extensions, required[index][1])))
+		{
+			platform_log("OpenGL 2.1 without %s: some of the game draws wrongly or not at all", required[index][0]);
+		}
+	}
+}
+#endif
+
 static void gl_initialize(void)
 {
 	GLint major = 0, minor = 0;
 	int index;
 
+#ifdef HALO_ANDROID
 	glGetIntegerv(GL_MAJOR_VERSION, &major);
 	glGetIntegerv(GL_MINOR_VERSION, &minor);
-#ifdef HALO_ANDROID
 	{
 		BOOL es32 = major > 3 || (major == 3 && minor >= 2);
 
@@ -1384,7 +1461,21 @@ static void gl_initialize(void)
 			xgpu_capabilities.anisotropy, xgpu_capabilities.s3tc, xgpu_capabilities.atomic_counters);
 	}
 #else
-	if (config_boolean("debug.gl_debug"))
+	{
+		/* (GL_MAJOR_VERSION is OpenGL 3's) */
+		const char *version = (const char *)glGetString(GL_VERSION);
+
+		major = version ? atoi(version) : 0;
+		(void)minor;
+		xgpu_capabilities.legacy = major < 3 || config_boolean("debug.legacy_gl");
+		if (xgpu_capabilities.legacy)
+		{
+			platform_log("OpenGL 2.1 renderer: GLSL 1.20 shaders, visibility tests polled");
+			legacy_extensions_check();
+		}
+	}
+	/* (KHR_debug, which OpenGL 2.1 contexts may not have) */
+	if (config_boolean("debug.gl_debug") && glDebugMessageCallback)
 	{
 		glEnable(GL_DEBUG_OUTPUT);
 		glEnable(GL_DEBUG_OUTPUT_SYNCHRONOUS);
@@ -1423,20 +1514,27 @@ static void gl_initialize(void)
 	glGenSamplers(D3DTSS_MAXSTAGES, device.samplers);
 	glGenQueries(VISIBILITY_TEST_SLOTS, device.queries);
 #ifndef HALO_ANDROID
-	glGenBuffers(1, &device.visibility_results_buffer);
-	glBindBuffer(GL_QUERY_BUFFER, device.visibility_results_buffer);
-	glBufferStorage(GL_QUERY_BUFFER, VISIBILITY_TEST_SLOTS * sizeof(GLuint), NULL,
-		GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-	device.visibility_results = glMapBufferRange(GL_QUERY_BUFFER, 0, VISIBILITY_TEST_SLOTS * sizeof(GLuint),
-		GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
-	if (!device.visibility_results)
-		platform_log("cannot map the visibility test results; tests wait for the GPU");
+	/* (OpenGL 2.1 has no query buffers: its tests are polled, as where the
+	mapping fails) */
+	if (!xgpu_capabilities.legacy)
+	{
+		glGenBuffers(1, &device.visibility_results_buffer);
+		glBindBuffer(GL_QUERY_BUFFER, device.visibility_results_buffer);
+		glBufferStorage(GL_QUERY_BUFFER, VISIBILITY_TEST_SLOTS * sizeof(GLuint), NULL,
+			GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+		device.visibility_results = glMapBufferRange(GL_QUERY_BUFFER, 0, VISIBILITY_TEST_SLOTS * sizeof(GLuint),
+			GL_MAP_READ_BIT | GL_MAP_PERSISTENT_BIT | GL_MAP_COHERENT_BIT);
+		if (!device.visibility_results)
+			platform_log("cannot map the visibility test results; tests wait for the GPU");
+	}
 	{
 		long every = config_integer("debug.gpu_flush_draws");
 		const char *renderer = (const char *)glGetString(GL_RENDERER);
 
+		/* (the hang is of newer Intel graphics, Mesa's iris driver; Ironlake
+		and the others with OpenGL 2.1 have crocus) */
 		if (every < 0)
-			every = renderer && strstr(renderer, "Mesa Intel") ? 3 : 0;
+			every = renderer && strstr(renderer, "Mesa Intel") && !xgpu_capabilities.legacy ? 3 : 0;
 		if (every > 0)
 		{
 			device.flush_every = (unsigned long)every;
@@ -2016,6 +2114,14 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 	}
 #endif
 	glGetQueryObjectuiv(device.queries[index], GL_QUERY_RESULT_AVAILABLE, &available);
+#ifndef HALO_ANDROID
+	if (!available && device.visibility_latest_known[index])
+	{
+		if (result)
+			*result = device.visibility_latest[index];
+		return S_OK;
+	}
+#endif
 	if (!available)
 		return D3DERR_TESTINCOMPLETE;
 	glGetQueryObjectuiv(device.queries[index], GL_QUERY_RESULT, &samples);
@@ -2027,6 +2133,8 @@ HRESULT WINAPI D3DDevice_GetVisibilityTestResult(DWORD index, UINT *result, ULON
 		samples = VISIBILITY_ALL_SAMPLES;
 #else
 	samples = visibility_unscaled(samples, index);
+	device.visibility_latest[index] = samples;
+	device.visibility_latest_known[index] = TRUE;
 #endif
 	if (result)
 		*result = samples;
@@ -2833,6 +2941,13 @@ static GLenum blend_equation(DWORD operation)
 	}
 }
 
+/* how far an EQUAL pass is nudged toward the camera with OpenGL 2.1
+(apply_raster_state), in depth units; none of it in proportion to the
+polygon's depth slope, which is unbounded for one seen edge on (the
+landscape through the Pelican's door then drew over its inside) */
+#define EQUAL_PASS_OFFSET_UNITS -4.0f
+#define EQUAL_PASS_OFFSET_SLOPE 0.0f
+
 static void apply_raster_state(BOOL has_depth)
 {
 	DWORD *rs = D3D__RenderState;
@@ -2842,6 +2957,7 @@ static void apply_raster_state(BOOL has_depth)
 	float depth_range[2];
 	unsigned char color_mask;
 	BOOL depth_test = has_depth && rs[D3DRS_ZENABLE];
+	BOOL equal_pass;
 
 	viewport[0] = target_pixel((float)device.viewport.X, 0);
 	viewport[1] = target_pixel((float)device.viewport.Y, 1);
@@ -2871,10 +2987,18 @@ static void apply_raster_state(BOOL has_depth)
 		glDepthRange(depth_range[0], depth_range[1]);
 	}
 
+	/* The game draws a surface in several passes: the first writes depth and
+	the others draw where depth is EQUAL (lightmap, then textures multiplied
+	in, then fog). With OpenGL 2.1 on Intel's Ironlake the passes' depths
+	differ by a unit or two, though their positions come from the same code
+	(invariant gl_Position), and whole triangles lose their textures, their
+	raw lightmap flickering in and out as the view moves. Those passes draw
+	where depth is LEQUAL, nudged toward the camera by that much. */
+	equal_pass = XGPU_LEGACY && depth_test && rs[D3DRS_ZFUNC] == D3DCMP_EQUAL && !rs[D3DRS_ZWRITEENABLE];
 	state_enable(&gl_state.depth_test, GL_DEPTH_TEST, depth_test);
 	if (depth_test)
 	{
-		GLenum function = rs[D3DRS_ZFUNC] ? (GLenum)rs[D3DRS_ZFUNC] : GL_NEVER;
+		GLenum function = equal_pass ? GL_LEQUAL : rs[D3DRS_ZFUNC] ? (GLenum)rs[D3DRS_ZFUNC] : GL_NEVER;
 
 		if (gl_state.depth_function != function)
 		{
@@ -2994,16 +3118,24 @@ static void apply_raster_state(BOOL has_depth)
 #endif
 
 	/* D3DRS_ZBIAS is expressed in these states (D3DDevice_SetRenderState_ZBias) */
-	state_enable(&gl_state.offset_fill, GL_POLYGON_OFFSET_FILL, rs[D3DRS_SOLIDOFFSETENABLE] != 0);
+	state_enable(&gl_state.offset_fill, GL_POLYGON_OFFSET_FILL, rs[D3DRS_SOLIDOFFSETENABLE] || equal_pass);
 #ifndef HALO_ANDROID
-	state_enable(&gl_state.offset_line, GL_POLYGON_OFFSET_LINE, rs[D3DRS_SOLIDOFFSETENABLE] != 0);
+	state_enable(&gl_state.offset_line, GL_POLYGON_OFFSET_LINE, rs[D3DRS_SOLIDOFFSETENABLE] || equal_pass);
 #endif
-	if (rs[D3DRS_SOLIDOFFSETENABLE])
+	if (rs[D3DRS_SOLIDOFFSETENABLE] || equal_pass)
 	{
-		float offset[2];
+		float offset[2] = { 0.0f, 0.0f };
 
-		offset[0] = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
-		offset[1] = dword_to_float(rs[D3DRS_POLYGONOFFSETZOFFSET]);
+		if (rs[D3DRS_SOLIDOFFSETENABLE])
+		{
+			offset[0] = dword_to_float(rs[D3DRS_POLYGONOFFSETZSLOPESCALE]);
+			offset[1] = dword_to_float(rs[D3DRS_POLYGONOFFSETZOFFSET]);
+		}
+		if (equal_pass)
+		{
+			offset[0] += EQUAL_PASS_OFFSET_SLOPE;
+			offset[1] += EQUAL_PASS_OFFSET_UNITS;
+		}
 		if (memcmp(gl_state.polygon_offset, offset, sizeof(offset)))
 		{
 			memcpy(gl_state.polygon_offset, offset, sizeof(offset));
@@ -3074,7 +3206,11 @@ static void draw_flush(void)
 	if (device.flush_every && ++device.flush_draws >= device.flush_every)
 	{
 		device.flush_draws = 0;
-		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
+		/* (OpenGL 2.1 has no memory barriers: a flush is one too) */
+		if (xgpu_capabilities.legacy)
+			glFlush();
+		else
+			glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 	}
 #endif
 }
@@ -3157,8 +3293,8 @@ static struct program_entry *prepare_draw(BOOL immediate)
 		D3D__RenderState[D3DRS_DESTBLEND] == D3DBLEND_SRCALPHA;
 	key.alpha_test_function = D3D__RenderState[D3DRS_ALPHATESTENABLE] ? D3D__RenderState[D3DRS_ALPHAFUNC] : 0;
 #ifndef HALO_ANDROID
-	/* (gl_SampleMask: ES has it only from 3.2) */
-	if (target_samples > 1 && key.alpha_test_function && !D3D__RenderState[D3DRS_ALPHABLENDENABLE])
+	/* (gl_SampleMask: ES has it only from 3.2, and GLSL 1.20 not at all) */
+	if (target_samples > 1 && key.alpha_test_function && !D3D__RenderState[D3DRS_ALPHABLENDENABLE] && !XGPU_LEGACY)
 		key.alpha_test_samples = (unsigned char)target_samples;
 #endif
 	key.fog_enable = D3D__RenderState[D3DRS_FOGENABLE] != 0;
@@ -3948,7 +4084,14 @@ static void setup_streams(unsigned long first, unsigned long count)
 			stream_buffers[stream] = device.stream_buffer;
 			stats.streamed_bytes += bytes;
 		}
-		if (element->type == D3DVSDT_NORMPACKED3)
+		if (element->type == D3DVSDT_NORMPACKED3 && XGPU_LEGACY)
+		{
+			/* GLSL 1.20 has no integers: the word as its two 16-bit halves,
+			whose fields the shader takes apart with float arithmetic */
+			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 2, GL_UNSIGNED_SHORT, GL_FALSE,
+				FALSE, (GLsizei)stride, stream_offsets[stream], element->offset);
+		}
+		else if (element->type == D3DVSDT_NORMPACKED3)
 		{
 			state_attribute_stream(element->reg, (GLuint)stream, stream_buffers[stream], 1, GL_UNSIGNED_INT, GL_FALSE,
 				TRUE, (GLsizei)stride, stream_offsets[stream], element->offset);

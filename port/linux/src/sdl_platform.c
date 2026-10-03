@@ -733,7 +733,24 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 	platform_fullscreen_requested = platform_fullscreen_setting();
 	platform_fullscreen_kind_apply();
 #endif
+#ifdef HALO_ANDROID
 	platform_gl_context = SDL_GL_CreateContext(platform_window);
+#else
+	if (!config_boolean("debug.legacy_gl"))
+		platform_gl_context = SDL_GL_CreateContext(platform_window);
+	/* graphics without OpenGL 4.5 (Intel's Ironlake and older): a 2.1
+	compatibility context, with which the renderer draws as best it can
+	(xgpu_capabilities.legacy) */
+	if (!platform_gl_context)
+	{
+		if (!config_boolean("debug.legacy_gl"))
+			platform_log("no OpenGL 4.5 context (%s); trying OpenGL 2.1", SDL_GetError());
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_COMPATIBILITY);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 2);
+		SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 1);
+		platform_gl_context = SDL_GL_CreateContext(platform_window);
+	}
+#endif
 #ifdef HALO_ANDROID
 	/* ES 3.2 where the driver has it, otherwise the renderer makes do with
 	3.0 plus extensions */

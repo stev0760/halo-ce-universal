@@ -220,6 +220,11 @@ static void combiner_stage(struct xgpu_text *text, const DWORD *state, int stage
 		{
 			if (mux_msb)
 				xgpu_text_append(text, "\t\t%s %sSUM = r0.a >= 0.5 ? %sCD : %sAB;\n", type, prefix, prefix, prefix);
+			else if (XGPU_LEGACY)
+				/* GLSL 1.20 has no integers: the parity of the same truncated
+				value (the low bit of a negative one as two's complement) */
+				xgpu_text_append(text, "\t\t%s %sSUM = mod(sign(r0.a * 255.0 + 0.5) * floor(abs(r0.a * 255.0 + 0.5)), 2.0)"
+					" != 0.0 ? %sCD : %sAB;\n", type, prefix, prefix, prefix);
 			else
 				xgpu_text_append(text, "\t\t%s %sSUM = (int(r0.a * 255.0 + 0.5) & 1) != 0 ? %sCD : %sAB;\n",
 					type, prefix, prefix, prefix);
@@ -325,11 +330,27 @@ static void dot_input(struct xgpu_text *text, const DWORD *state, int stage)
 	"precision highp samplerCube;\n"
 #else
 #define SAMPLE_BIAS ""
-#define SHADER_VERSION "#version 450 core\n"
 #endif
 
 static void sample(struct xgpu_text *text, const struct nv2a_pixel_shader_key *key, int stage, const char *coordinates)
 {
+	/* GLSL 1.20 names each lookup by its sampler's type */
+	if (XGPU_LEGACY)
+	{
+		switch (key->sampler_type[stage])
+		{
+		case _xgpu_sampler_3d:
+			xgpu_text_append(text, "texture3D(tex%d, (%s).xyz)", stage, coordinates);
+			break;
+		case _xgpu_sampler_cube:
+			xgpu_text_append(text, "textureCube(tex%d, (%s).xyz)", stage, coordinates);
+			break;
+		default:
+			xgpu_text_append(text, "texture2D(tex%d, (%s).xy * texture_scale[%d].xy)", stage, coordinates, stage);
+			break;
+		}
+		return;
+	}
 	switch (key->sampler_type[stage])
 	{
 	case _xgpu_sampler_3d:
@@ -533,12 +554,14 @@ programs write apart (0, or planar fog's), is kept. */
 
 static void model_lighting(struct xgpu_text *text, BOOL point_lights)
 {
+	/* (GLSL 1.20's inputs are "varying") */
+	const char *input = XGPU_LEGACY ? "varying" : "in";
 	int light;
 
+	xgpu_text_append(text, "uniform vec4 model_lights[%d];\n%s vec4 xWorldNormal;\n", XGPU_MODEL_LIGHT_COUNT, input);
+	if (point_lights)
+		xgpu_text_append(text, "%s vec3 xWorldPosition;\n", input);
 	xgpu_text_append(text,
-		"uniform vec4 model_lights[%d];\n"
-		"in vec4 xWorldNormal;\n"
-		"%s"
 		"vec3 model_lighting()\n"
 		"{\n"
 		/* the normal's direction between the vertices, at the length the
@@ -549,8 +572,7 @@ static void model_lighting(struct xgpu_text *text, BOOL point_lights)
 		back by the translucency, and the second */
 		"\tfloat facing = dot(n, -model_lights[7].xyz);\n"
 		"\tvec3 light = model_lights[11].xyz + max(max(facing, -facing * model_lights[0].z), 0.0) * model_lights[8].xyz +\n"
-		"\t\tmax(dot(n, -model_lights[9].xyz), 0.0) * model_lights[10].xyz;\n",
-		XGPU_MODEL_LIGHT_COUNT, point_lights ? "in vec3 xWorldPosition;\n" : "");
+		"\t\tmax(dot(n, -model_lights[9].xyz), 0.0) * model_lights[10].xyz;\n");
 	/* each point light: its position and 1 / radius squared, its cone's axis
 	and falloff scale, its color and falloff offset */
 	for (light = 0; point_lights && light < 2; light++)
@@ -594,19 +616,26 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 			"layout(binding = 0, offset = 0) uniform atomic_uint visible_samples;\n");
 	}
 #endif
-	xgpu_text_append(&text,
-		SHADER_VERSION
-		"in vec4 xD0;\n"
-		"in vec4 xD1;\n"
-		"in vec4 xB0;\n"
-		"in vec4 xB1;\n"
-		"in vec4 xT0;\n"
-		"in vec4 xT1;\n"
-		"in vec4 xT2;\n"
-		"in vec4 xT3;\n"
-		"in float xFog;\n"
-		"layout(location = 0) out vec4 fragment_color;\n"
-		XGPU_PIXEL_UNIFORMS);
+#ifdef HALO_ANDROID
+	xgpu_text_append(&text, SHADER_VERSION);
+#else
+	xgpu_text_append(&text, "%s", XGPU_LEGACY ? "#version 120\n" : "#version 450 core\n");
+#endif
+	{
+		/* the vertex shader's outputs (nv2a_vsh.c) */
+		static const char *const inputs[] =
+		{
+			"vec4 xD0", "vec4 xD1", "vec4 xB0", "vec4 xB1", "vec4 xT0", "vec4 xT1", "vec4 xT2", "vec4 xT3", "float xFog",
+		};
+		unsigned long index;
+
+		for (index = 0; index < sizeof(inputs) / sizeof(inputs[0]); index++)
+			xgpu_text_append(&text, "%s %s;\n", XGPU_LEGACY ? "varying" : "in", inputs[index]);
+	}
+	/* (GLSL 1.20 writes gl_FragColor) */
+	if (!XGPU_LEGACY)
+		xgpu_text_append(&text, "layout(location = 0) out vec4 fragment_color;\n");
+	xgpu_text_append(&text, XGPU_PIXEL_UNIFORMS);
 	for (stage = 0; stage < 4; stage++)
 		xgpu_text_append(&text, "uniform %s tex%d;\n", sampler_declaration(key->sampler_type[stage]), stage);
 	if (key->per_pixel_lighting)
@@ -734,6 +763,6 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key)
 	if (key->count_samples)
 		xgpu_text_append(&text, "\tatomicCounterIncrement(visible_samples);\n");
 #endif
-	xgpu_text_append(&text, "\tfragment_color = clamp(result, 0.0, 1.0);\n}\n");
+	xgpu_text_append(&text, "\t%s = clamp(result, 0.0, 1.0);\n}\n", XGPU_LEGACY ? "gl_FragColor" : "fragment_color");
 	return text.buffer;
 }
