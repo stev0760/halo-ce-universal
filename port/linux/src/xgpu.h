@@ -53,6 +53,29 @@ void host_gl_read_buffer(unsigned int buffer, unsigned int offset, unsigned int 
 void host_gl_buffer_write(unsigned int target, unsigned int offset, unsigned int size, const void *data);
 void host_gl_fence_frame(unsigned int slot);
 void host_gl_wait_frame(unsigned int slot);
+#else
+/* the desktop context (d3d8_gl.c gl_initialize): OpenGL 4.5 core, or
+OpenGL 2.1 where the graphics have no more (Intel's Ironlake and older,
+sdl_platform.c), with the extensions Mesa offers there for the rest */
+struct xgpu_capabilities
+{
+	/* OpenGL 2.1: GLSL 1.20 shaders (no integers, attribute and varying
+	qualifiers, gl_FragColor), no query buffers and no memory barriers */
+	BOOL legacy;
+	/* GL_EXT_frag_depth: a fragment program may give its own fragment a
+	depth (GLSL 1.20's gl_FragDepthEXT). Without it a z-sprite is drawn at
+	its card's depth, which a surface it stands on cuts in half. */
+	BOOL frag_depth;
+};
+
+extern struct xgpu_capabilities xgpu_capabilities;
+#endif
+
+/* drawing with OpenGL 2.1 (never on OpenGL ES) */
+#ifdef HALO_GLES
+#define XGPU_LEGACY FALSE
+#else
+#define XGPU_LEGACY (xgpu_capabilities.legacy)
 #endif
 
 /* ---------- GL state
@@ -112,10 +135,11 @@ BOOL nv2a_vertex_shader_lighting(const DWORD *instructions, unsigned long instru
 
 /* GLSL for an NV2A vertex program (the instruction words after the program
 header). Attributes whose bit is set in packed_attribute_mask are fed as
-NORMPACKED3 32-bit integers and unpacked in the shader. With lighting (else
-NULL), the normal and world position go to the pixel shader too, which
-lights the diffuse color for each pixel (nv2a_pixel_shader_key
-per_pixel_lighting). Returns a malloc'd string. */
+NORMPACKED3 32-bit integers and unpacked in the shader (with OpenGL 2.1, as
+two unsigned shorts: xgpu_capabilities.legacy). With lighting (else NULL),
+the normal and world position go to the pixel shader too, which lights the
+diffuse color for each pixel (nv2a_pixel_shader_key per_pixel_lighting).
+Returns a malloc'd string. */
 char *nv2a_vertex_shader_to_glsl(const DWORD *instructions, unsigned long instruction_count,
 	unsigned long packed_attribute_mask, const struct nv2a_vertex_lighting *lighting);
 /* the fixed-function pipeline's vertex shader (the loading screen's draws):
@@ -187,7 +211,10 @@ char *nv2a_pixel_shader_to_glsl(const struct nv2a_pixel_shader_key *key);
 #endif
 
 /* the combiner registers that live in uniforms rather than in the program:
-C0/C1 of each stage and the final combiner, and texture constants */
+C0/C1 of each stage and the final combiner, and texture constants.
+texture_scale is each stage's lookup scale in xy (the texel's size's
+reciprocal where the coordinates name texels, else one) and, in zw, the
+texture's own width and height: GLSL 1.20 has no textureSize (nv2a_psh.c) */
 #define XGPU_PIXEL_UNIFORMS \
 	"uniform vec4 ps_c0[8];\n" \
 	"uniform vec4 ps_c1[8];\n" \

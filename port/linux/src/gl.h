@@ -144,6 +144,7 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 	X(glDrawElementsBaseVertexEXT) \
 	X(glDrawElementsBaseVertexOES)
 /* ANDROID_GL_FUNCTIONS_END */
+#define GL_FUNCTIONS_OPTIONAL(X)
 #else
 #define GL_FUNCTIONS(X) \
 	X(glGetString) \
@@ -216,22 +217,12 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 	X(glBindBuffer) \
 	X(glBufferData) \
 	X(glBufferSubData) \
-	X(glBufferStorage) \
-	X(glMapBufferRange) \
-	X(glBindBufferBase) \
 	X(glGenVertexArrays) \
 	X(glBindVertexArray) \
 	X(glEnableVertexAttribArray) \
 	X(glDisableVertexAttribArray) \
 	X(glVertexAttribPointer) \
-	X(glVertexAttribIPointer) \
-	X(glVertexAttribFormat) \
-	X(glVertexAttribIFormat) \
-	X(glVertexAttribBinding) \
-	X(glBindVertexBuffer) \
-	X(glBindTextures) \
 	X(glVertexAttrib4fv) \
-	X(glVertexAttribI4ui) \
 	X(glDrawArrays) \
 	X(glDrawElements) \
 	X(glDrawElementsBaseVertex) \
@@ -244,13 +235,9 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 	X(glCreateProgram) \
 	X(glAttachShader) \
 	X(glBindAttribLocation) \
-	X(glBindFragDataLocation) \
 	X(glLinkProgram) \
 	X(glGetProgramiv) \
 	X(glGetProgramInfoLog) \
-	X(glProgramParameteri) \
-	X(glGetProgramBinary) \
-	X(glProgramBinary) \
 	X(glDeleteProgram) \
 	X(glUseProgram) \
 	X(glGetUniformLocation) \
@@ -262,7 +249,25 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 	X(glGenQueries) \
 	X(glBeginQuery) \
 	X(glEndQuery) \
-	X(glGetQueryObjectuiv) \
+	X(glGetQueryObjectuiv)
+/* OpenGL 3 and 4 functions that only the OpenGL 4.5 path calls: an OpenGL
+2.1 context can lack them (xgpu_capabilities.legacy), so they are optional.
+This is the desktop counterpart of the OpenGL ES table's own optional one. */
+#define GL_OPTIONAL_FUNCTIONS(X) \
+	X(glBufferStorage) \
+	X(glMapBufferRange) \
+	X(glBindBufferBase) \
+	X(glVertexAttribIPointer) \
+	X(glVertexAttribFormat) \
+	X(glVertexAttribIFormat) \
+	X(glVertexAttribBinding) \
+	X(glBindVertexBuffer) \
+	X(glBindTextures) \
+	X(glProgramParameteri) \
+	X(glGetProgramBinary) \
+	X(glProgramBinary) \
+	X(glBindFragDataLocation) \
+	X(glVertexAttribI4ui) \
 	X(glMemoryBarrier) \
 	X(glCreateQueries) \
 	X(glIsQuery) \
@@ -275,9 +280,7 @@ context has the extension, never required (gl_functions.c). On ES 3.0 and
 
 #define GL_DECLARE_FUNCTION(name) extern __typeof__(&name) halo_##name;
 GL_FUNCTIONS(GL_DECLARE_FUNCTION)
-#ifdef HALO_GLES
 GL_OPTIONAL_FUNCTIONS(GL_DECLARE_FUNCTION)
-#endif
 #undef GL_DECLARE_FUNCTION
 
 /* call sites use the ordinary names; gl_functions.c, which defines the
@@ -521,7 +524,8 @@ pointers, sees the declarations without these aliases */
 #endif
 #endif
 
-/* returns FALSE (and logs) if a required function is missing */
+/* returns FALSE (and logs) if a required function is missing; a missing
+optional one is left NULL */
 int gl_functions_load(void);
 
 #endif

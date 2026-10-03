@@ -689,6 +689,18 @@ static BOOL programs_prepare(int set, int first, int last)
 
 	if (post.failed[set])
 		return FALSE;
+	/* (every program here is GLSL 4.50's, which OpenGL 2.1 cannot build) */
+	if (XGPU_LEGACY)
+	{
+		static const char *const names[NUMBER_OF_POST_SETS] =
+		{
+			"anti-aliasing: FXAA", "anti-aliasing: SMAA", "HDR", "the HDR calibration screen"
+		};
+
+		platform_log("%s needs OpenGL 4.5", names[set]);
+		post.failed[set] = TRUE;
+		return FALSE;
+	}
 	for (which = first; which <= last; which++)
 	{
 		if (!post.programs[which] && !(post.programs[which] = program_build(which)))
