@@ -47,6 +47,10 @@ update.h's: posix_update.c on Linux, win32_update.c on Windows.
 #endif
 
 #define UPDATE_REPOSITORY "OpenCommunityEdition/OpenCE"
+/* Off in this fork: its builds draw with OpenGL 2.1 where upstream's need
+4.5, and UPDATE_REPOSITORY's releases would replace them. 1 again once that
+names the fork's own releases. */
+#define UPDATE_ENABLED 0
 #ifdef _WIN32
 #define UPDATE_PLATFORM "windows"
 #define PATH_SEPARATOR "\\"
@@ -558,7 +562,7 @@ void updater_start(void)
 	updater_clean_up();
 	/* (not for builds without a number, the player's no, or runs nobody is
 	watching, but for a test with its answer) */
-	if (HALO_BUILD_NUMBER <= 0 || !config_boolean("update.auto") ||
+	if (!UPDATE_ENABLED || HALO_BUILD_NUMBER <= 0 || !config_boolean("update.auto") ||
 		(!config_string("debug.update_answer")[0] && (config_boolean("debug.hidden_window") ||
 			config_real("debug.exit_after") > 0.0 || config_string("debug.network_test")[0])))
 	{
