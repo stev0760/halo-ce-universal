@@ -39,8 +39,9 @@ void host_gl_fence_frame(unsigned int slot);
 void host_gl_wait_frame(unsigned int slot);
 #else
 /* the desktop context (d3d8_gl.c gl_initialize): OpenGL 4.5 core, or
-OpenGL 2.1 where the graphics have no more (Intel's Ironlake and older,
-sdl_platform.c), with the extensions Mesa offers there for the rest */
+where the graphics have no 4.5 (Intel's Ironlake, Sandy Bridge and Ivy
+Bridge, sdl_platform.c) a compatibility context drawn with as OpenGL 2.1,
+with the extensions Mesa offers there for the rest */
 struct xgpu_capabilities
 {
 	/* OpenGL 2.1: GLSL 1.20 shaders (no integers, attribute and varying

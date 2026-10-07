@@ -738,9 +738,9 @@ BOOL platform_video_initialize(unsigned long width, unsigned long height)
 #else
 	if (!config_boolean("debug.legacy_gl"))
 		platform_gl_context = SDL_GL_CreateContext(platform_window);
-	/* graphics without OpenGL 4.5 (Intel's Ironlake and older): a 2.1
-	compatibility context, with which the renderer draws as best it can
-	(xgpu_capabilities.legacy) */
+	/* graphics without OpenGL 4.5 (Intel's Ironlake, Sandy Bridge and Ivy
+	Bridge): a 2.1 compatibility context, or the driver's newest, with which
+	the renderer draws as OpenGL 2.1 does (xgpu_capabilities.legacy) */
 	if (!platform_gl_context)
 	{
 		if (!config_boolean("debug.legacy_gl"))

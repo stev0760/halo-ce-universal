@@ -409,7 +409,8 @@ static const struct config_setting config_settings[] =
 		"menu, a player profile being edited; empty for the main menu." },
 	{ "debug.legacy_gl", _config_boolean, "false", "HALO_LEGACY_GL", _environment_set_is_true, _platform_desktop,
 		"Draw with OpenGL 2.1 even where OpenGL 4.5 is available, as the game\n"
-		"does by itself on graphics without it (Intel's Ironlake and older)." },
+		"does by itself on graphics without it (Intel's Ironlake, Sandy Bridge\n"
+		"and Ivy Bridge)." },
 	{ "debug.gpu_flush_draws", _config_integer, "-1", "HALO_GPU_FLUSH_DRAWS", _environment_value, _platform_desktop,
 		"Flush the GPU's pipeline every this many draws: -1 for every 3 on Intel\n"
 		"graphics with Mesa's driver (which can hang without), 0 never." },

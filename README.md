@@ -9,7 +9,9 @@ builds do not start on them. This fork adds an OpenGL 2.1 renderer for
 those GPUs.
 
 The test machine is a ThinkPad X201: Intel HD Graphics (Ironlake), OpenGL
-2.1 through Mesa's `crocus` driver. The game plays well on it.
+2.1 through Mesa's `crocus` driver. The game plays well on it. Sandy Bridge
+(Mesa gives OpenGL 3.0 for the game's context) uses the same renderer, but
+it is not yet tested on a real machine.
 
 The fork follows upstream. `main` is a copy of upstream. The fork's changes
 are on `legacy-gl21` (this branch), which is rebased onto `main` when
@@ -21,7 +23,7 @@ setting.
 
 | Change | Description |
 | --- | --- |
-| OpenGL 2.1 renderer | On a GPU with only OpenGL 2.1, the game draws with OpenGL 2.1 and GLSL 1.20 shaders. `debug.legacy_gl = true` uses OpenGL 2.1 on newer GPUs too, to test it. |
+| OpenGL 2.1 renderer | On a GPU without OpenGL 4.5, the game draws as OpenGL 2.1 does, with GLSL 1.20 shaders. `debug.legacy_gl = true` uses this renderer on newer GPUs too, to test it. |
 | `display.render_scale` | The game draws at this share of the window's resolution (0.25 to 1.0) and scales the picture up. Lower is faster on slow GPUs. The X201 plays well at 0.6. |
 | Camera below 30 fps | When frames come slower than ticks, the camera and the first-person weapon are blended as the objects are. Before, the camera was drawn ahead of the vehicle it rode. |
 | No self-updater | Upstream's releases need OpenGL 4.5. The updater would replace this build with one of them. |

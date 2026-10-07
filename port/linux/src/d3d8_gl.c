@@ -1407,8 +1407,9 @@ static BOOL gl_has_extension(const char *extensions, const char *name)
 }
 
 /* OpenGL 2.1 lacks much of what the renderer uses, which Mesa's drivers
-offer as extensions even on graphics that old (Intel's Ironlake): name any
-missing, as the draws that need them fail or come out wrong */
+offer as extensions even on graphics that old (Intel's Ironlake), and newer
+contexts below 4.5 have: name any missing, as the draws that need them fail
+or come out wrong */
 static void legacy_extensions_check(void)
 {
 	/* each the extension, or another that does as well */
@@ -1434,7 +1435,8 @@ static void legacy_extensions_check(void)
 		if (!gl_has_extension(extensions, required[index][0]) &&
 			(!required[index][1] || !gl_has_extension(extensions, required[index][1])))
 		{
-			platform_log("OpenGL 2.1 without %s: some of the game draws wrongly or not at all", required[index][0]);
+			platform_log("OpenGL 2.1 renderer without %s: some of the game draws wrongly or not at all",
+				required[index][0]);
 		}
 	}
 }
@@ -1476,15 +1478,20 @@ static void gl_initialize(void)
 	}
 #else
 	{
-		/* (GL_MAJOR_VERSION is OpenGL 3's) */
+		/* The renderer needs OpenGL 4.5: a context of any older version
+		draws as OpenGL 2.1 does. That is 2.1 itself on Intel's Ironlake,
+		but where the 4.5 context failed, the 2.1 one asked for instead
+		(sdl_platform.c) is the driver's newest compatibility version: 3.0
+		on Sandy Bridge. (GL_MAJOR_VERSION is OpenGL 3's.) */
 		const char *version = (const char *)glGetString(GL_VERSION);
 
-		major = version ? atoi(version) : 0;
-		(void)minor;
-		xgpu_capabilities.legacy = major < 3 || config_boolean("debug.legacy_gl");
+		if (!version || sscanf(version, "%d.%d", &major, &minor) != 2)
+			major = minor = 0;
+		xgpu_capabilities.legacy = major < 4 || (major == 4 && minor < 5) || config_boolean("debug.legacy_gl");
 		if (xgpu_capabilities.legacy)
 		{
-			platform_log("OpenGL 2.1 renderer: GLSL 1.20 shaders, visibility tests polled");
+			platform_log("OpenGL 2.1 renderer (on OpenGL %d.%d): GLSL 1.20 shaders, visibility tests polled",
+				(int)major, (int)minor);
 			legacy_extensions_check();
 		}
 	}
