@@ -13,7 +13,12 @@ builds do not start on them. This fork draws as OpenGL 2.1 does on those
 GPUs.
 
 The test machine is a ThinkPad X201: Intel HD Graphics (Ironlake), OpenGL
-2.1 through Mesa's `crocus` driver. The game plays well on it.
+2.1 through Mesa's `crocus` driver. The game plays well on it. Sandy Bridge
+and Ivy Bridge draw the same way -- the 2.1 compatibility context the game
+falls back to is the driver's newest, 3.0 and 3.1 there, and any version
+below 4.5 takes this path -- but nobody has run them yet. Sandy Bridge
+(Mesa gives OpenGL 3.0 for the game's context) uses the same renderer, but
+it is not yet tested on a real machine.
 
 The fork follows upstream. `main` is a copy of upstream. The fork's changes
 are on `legacy-gl21` (this branch), which is rebased onto `main` when
