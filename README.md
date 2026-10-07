@@ -1,5 +1,66 @@
 # Halo: Combat Evolved for Linux, Windows and Android
 
+## This fork: old hardware
+
+This fork of [OpenCommunityEdition/OpenCE](https://github.com/OpenCommunityEdition/OpenCE)
+keeps the game working on old, slow hardware. The upstream project draws
+with OpenGL 4.5. Many older GPUs do not have OpenGL 4.5, and the upstream
+builds do not start on them. This fork adds an OpenGL 2.1 renderer for
+those GPUs.
+
+The test machine is a ThinkPad X201: Intel HD Graphics (Ironlake), OpenGL
+2.1 through Mesa's `crocus` driver. The game plays well on it.
+
+The fork follows upstream. `main` is a copy of upstream. The fork's changes
+are on `legacy-gl21` (this branch), which is rebased onto `main` when
+upstream changes. The goal is to keep the OpenGL 2.1 renderer working as
+upstream develops, and possibly to offer it to upstream as a compatibility
+setting.
+
+### What the fork changes
+
+| Change | Description |
+| --- | --- |
+| OpenGL 2.1 renderer | On a GPU with only OpenGL 2.1, the game draws with OpenGL 2.1 and GLSL 1.20 shaders. `debug.legacy_gl = true` uses OpenGL 2.1 on newer GPUs too, to test it. |
+| `display.render_scale` | The game draws at this share of the window's resolution (0.25 to 1.0) and scales the picture up. Lower is faster on slow GPUs. The X201 plays well at 0.6. |
+| Camera below 30 fps | When frames come slower than ticks, the camera and the first-person weapon are blended as the objects are. Before, the camera was drawn ahead of the vehicle it rode. |
+| No self-updater | Upstream's releases need OpenGL 4.5. The updater would replace this build with one of them. |
+
+With OpenGL 2.1, these functions are not available:
+
+- FXAA and SMAA (`display.anti_aliasing`). Their shaders need GLSL 4.50.
+- MSAA's smoothed edges on alpha-tested surfaces. (Mesa has no
+  multisampling on Ironlake at all.)
+
+Per-pixel lighting operates with OpenGL 2.1, but it costs frame rate.
+
+The OpenGL 2.1 renderer needs these extensions, which Mesa has even on
+Ironlake: framebuffer objects, sampler objects, vertex array objects,
+`draw_elements_base_vertex`, `copy_image`, `copy_buffer`, `clip_control`,
+texture swizzle, BGRA vertex arrays, S3TC textures and anisotropic
+filtering. At start-up, the game writes in its log the extensions that the
+GPU does not have.
+
+### Get the game
+
+This fork has no release builds. The download links and the Releases page
+below are upstream's, and those builds need OpenGL 4.5. Build the
+`legacy-gl21` branch as "Build the game" below tells:
+
+```
+git clone -b legacy-gl21 https://github.com/stev0760/halo-ce-universal.git
+cd halo-ce-universal
+python configure.py --release
+ninja linux
+```
+
+The fork is tested on Linux only. Other GPUs without OpenGL 4.5 can
+operate, but nobody has tested them yet.
+
+The rest of this README is upstream's.
+
+---
+
 [![Join our Discord](https://invidget.switchblade.xyz/9gqcHyr5km)](https://discord.gg/9gqcHyr5km)
 
 This project is a port of the Halo: Combat Evolved decompilation to Linux,
