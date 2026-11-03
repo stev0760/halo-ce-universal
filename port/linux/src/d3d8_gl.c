@@ -7701,9 +7701,9 @@ static void visibility_read_batch(void)
 	if (device.visibility_unavailable)
 		return;
 	/* (unbound: a query read with a query buffer bound takes its pointer for
-	an offset into it) */
-	/* (OpenGL 2.1 has no query buffer to unbind) */
-	if (!device.visibility_mapped && !XGPU_LEGACY)
+	an offset into it. Where there is no query buffer, as on OpenGL 2.1,
+	none is bound to unbind.) */
+	if (!device.visibility_mapped && device.visibility_buffer)
 	{
 		visibility_readback_gl_ok("before readback");
 		glGetIntegerv(GL_QUERY_BUFFER_BINDING, &binding);
