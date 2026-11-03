@@ -1272,8 +1272,7 @@ struct attribute_pointer
 	GLsizei stride;
 	unsigned long offset;
 };
-
-#ifndef HALO_ANDROID
+#else
 /* desktop GL (4.3) separates an attribute's format from the buffer it
 reads: the attributes of a stream share one binding, so a draw that moves
 the stream rebinds it once instead of pointing each attribute again */
@@ -3311,7 +3310,12 @@ static void visibility_results_initialize(void)
 	into the buffer (Mesa's GL thread waits for everything before a
 	glGetQueryObjectuiv, even one into a bound buffer), each batch into its
 	own part, with a fence after the copies. */
-	if (!vendor || strcmp(vendor, "ATI Technologies Inc."))
+	if (XGPU_LEGACY)
+	{
+		/* (OpenGL 2.1 has no query buffers at all) */
+		platform_log("GPU: OpenGL 2.1; visibility test queries are read on the CPU");
+	}
+	else if (!vendor || strcmp(vendor, "ATI Technologies Inc."))
 	{
 		visibility_readback_gl_ok("before buffer creation");
 		glGenBuffers(1, &device.visibility_buffer);
