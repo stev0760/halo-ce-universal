@@ -423,14 +423,16 @@ static void texture_stage(struct xgpu_text *text, const struct nv2a_pixel_shader
 			low-alpha artwork. Zero marks the atlas's continuous meters. */
 			if (XGPU_LEGACY)
 			{
-				/* GLSL 1.20 has neither textureSize nor texelFetch: the size
-				is the uniform's zw, and the texel's own centre samples that
-				texel exactly */
+				/* GLSL 1.20 has neither textureSize nor texelFetch: the
+				size is the uniform's zw, and the texel's own centre
+				samples that texel exactly. texture2DLod is vertex-only
+				in a fragment shader, so the texture2D bias pins the
+				lookup to level 0 instead. */
 				xgpu_text_append(text,
 					"\t{\n\t\tvec2 uv = (%s).xy * texture_scale[0].xy;\n"
 					"\t\tvec2 size = texture_scale[0].zw;\n"
 					"\t\tvec2 pixel = clamp(floor(uv * size), vec2(0.0), size - 1.0);\n"
-					"\t\tfloat threshold = texture2DLod(tex0, (pixel + 0.5) / size, 0.0).r;\n"
+					"\t\tfloat threshold = texture2D(tex0, (pixel + 0.5) / size, -16.0).r;\n"
 					"\t\tif (threshold > 0.0) t0.rb = vec2(threshold);\n\t}\n", coordinates);
 			}
 			else

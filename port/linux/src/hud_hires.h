@@ -82,6 +82,10 @@ long hud_hires_override_find(unsigned long address, unsigned long width, unsigne
 /* its GL texture (decoded and uploaded, mipmapped, on first use; 0 if it
 could not be), and the number of its mip levels */
 unsigned int hud_hires_override_texture(long asset, unsigned long *levels);
+/* the texture's own size in pixels, not the bitmap's it stands for (the
+legacy meter threshold lookup's size uniform needs it: GLSL 1.20 has no
+textureSize, nv2a_psh.c); 0 if asset is no override's */
+int hud_hires_override_size(long asset, unsigned long *width, unsigned long *height);
 /* a GL texture drawn from an 8-bit RGBA PNG (as the tools write them), with
 all its mip levels, and their number; 0 if it could not be */
 unsigned int hud_hires_png_texture(const void *png, unsigned long size, unsigned long *levels);

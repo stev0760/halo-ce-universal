@@ -331,6 +331,15 @@ int hud_hires_override_point_threshold(long asset)
 	return asset >= 0 && asset < hud_hires_asset_count() && hud_hires_embedded[asset].point_threshold;
 }
 
+int hud_hires_override_size(long asset, unsigned long *width, unsigned long *height)
+{
+	if (asset < 0 || asset >= hud_hires_asset_count())
+		return 0;
+	*width = hud_hires_embedded[asset].width;
+	*height = hud_hires_embedded[asset].height;
+	return 1;
+}
+
 /* ---------- decoding */
 
 /* Catmull-Rom interpolation of the map's original texels. No font, sprite

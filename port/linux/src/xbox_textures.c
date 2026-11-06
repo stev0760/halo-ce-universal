@@ -1280,6 +1280,11 @@ static GLuint texture_entry_result(struct texture_entry *entry, GLenum *target,
 			description->hires = TRUE;
 			description->hires_coverage = hud_hires_override_coverage(entry->override);
 			description->hires_point_threshold = hud_hires_override_point_threshold(entry->override);
+			/* the threshold lookup needs the texture's own size, not the
+			bitmap's its coordinates are in (the legacy shader reads it from
+			the texture_scale uniform: GLSL 1.20 has no textureSize) */
+			if (description->hires_point_threshold)
+				hud_hires_override_size(entry->override, &description->width, &description->height);
 			return texture;
 		}
 	}
